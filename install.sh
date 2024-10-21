@@ -14,7 +14,9 @@ fi
 
 # Detect project path
 PROJECT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+USER_NAME="$SUDO_USER"  # Get the username of the person invoking sudo
 echo -e "${YELLOW}Project path detected: ${PROJECT_PATH}${NC}"
+echo -e "${YELLOW}User detected: ${USER_NAME}${NC}"
 
 # Function to print error and exit
 function error_exit {
@@ -47,7 +49,7 @@ function install_packages {
     echo -e "${YELLOW}Updating package list...${NC}"
     xbps-install -S || error_exit "Failed to update package list."
 
-    REQUIRED_PACKAGES=(nginx gcc make)
+    REQUIRED_PACKAGES=(nginx gcc make acl)
 
     MISSING_PACKAGES=()
     for pkg in "${REQUIRED_PACKAGES[@]}"; do
@@ -74,10 +76,26 @@ function configure_nginx {
     echo -e "${GREEN}nginx configured successfully.${NC}"
 }
 
+# Function to adjust permissions
+function adjust_permissions {
+    echo -e "${YELLOW}Adjusting permissions for nginx user...${NC}"
+
+    # Add nginx user to the current user's group
+    usermod -a -G "$USER_NAME" nginx
+
+    # Adjust permissions on home directory and project directories
+    chmod g+x "/home/$USER_NAME"
+    chmod g+rx "$PROJECT_PATH"
+    chmod -R g+rx "$PROJECT_PATH/html"
+
+    echo -e "${GREEN}Permissions adjusted successfully.${NC}"
+}
+
 # Main script execution
 stop_services
 clean_previous_installation
 install_packages
 configure_nginx
+adjust_permissions
 echo -e "${GREEN}Installation completed successfully.${NC}"
 

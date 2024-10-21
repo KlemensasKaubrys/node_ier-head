@@ -32,26 +32,60 @@ void *client_handler(void *socket_desc) {
     if (read_size > 0) {
         buffer[read_size] = '\0';
         // Check if the request is for CPU usage data
-        if (strstr(buffer, "GET /cpu_usage")) {
+        if (strstr(buffer, "GET /backend/cpu_usage")) {
+            printf("Client requested CPU usage data.\n");
+
             // Send headers
             char headers[] = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
             send(sock, headers, strlen(headers), 0);
 
             // Send CPU usage data periodically
             while (running) {
-                struct sysinfo sys_info;
-                if(sysinfo(&sys_info) == 0) {
-                    double load = sys_info.loads[0] / 65536.0;
-                    char data[128];
-                    snprintf(data, sizeof(data), "data: %.2f\n\n", load);
-                    send(sock, data, strlen(data), 0);
+                FILE *fp;
+                char cpu_info[128];
+                double cpu_usage = 0.0;
+
+                // Read CPU usage from /proc/stat
+                fp = fopen("/proc/stat", "r");
+                if (fp != NULL) {
+                    unsigned long long int user, nice, system, idle;
+                    fgets(cpu_info, sizeof(cpu_info), fp);
+                    sscanf(cpu_info, "cpu %llu %llu %llu %llu", &user, &nice, &system, &idle);
+                    fclose(fp);
+
+                    static unsigned long long int prev_user = 0, prev_nice = 0, prev_system = 0, prev_idle = 0;
+
+                    unsigned long long int diff_user = user - prev_user;
+                    unsigned long long int diff_nice = nice - prev_nice;
+                    unsigned long long int diff_system = system - prev_system;
+                    unsigned long long int diff_idle = idle - prev_idle;
+
+                    unsigned long long int total_diff = diff_user + diff_nice + diff_system + diff_idle;
+                    unsigned long long int idle_diff = diff_idle;
+
+                    if (total_diff != 0) {
+                        cpu_usage = (double)(total_diff - idle_diff) / total_diff * 100.0;
+                    }
+
+                    prev_user = user;
+                    prev_nice = nice;
+                    prev_system = system;
+                    prev_idle = idle;
                 }
+
+                char data[128];
+                snprintf(data, sizeof(data), "data: %.2f\n\n", cpu_usage);
+                send(sock, data, strlen(data), 0);
+
+                printf("Sent data to client: %s", data);  // Verbose print
+
                 sleep(update_rate);
             }
         } else {
             // Send 404 Not Found
             char response[] = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n";
             send(sock, response, strlen(response), 0);
+            printf("Client requested unknown resource. Sent 404.\n");
         }
     }
 
