@@ -32,7 +32,7 @@ void *client_handler(void *socket_desc) {
     if (read_size > 0) {
         buffer[read_size] = '\0';
         // Check if the request is for CPU usage data
-        if (strstr(buffer, "GET /backend/cpu_usage")) {
+        if (strstr(buffer, "GET /cpu_usage")) {
             printf("Client requested CPU usage data.\n");
 
             // Send headers
