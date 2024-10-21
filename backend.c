@@ -10,14 +10,47 @@
 #include <errno.h>
 
 #define PORT 9000
-#define BUFFER_SIZE 1024
+#define BUFFER_SIZE 4096  // Increased buffer size to handle longer URLs
 
 volatile int running = 1;
-int update_rate = 1; // Default update rate in seconds
 
 void handle_sigint(int sig) {
     running = 0;
     printf("\nShutting down server...\n");
+}
+
+// Function to parse the 'rate' query parameter from the request
+int parse_update_rate(const char *buffer) {
+    int rate = 1000; // Default rate in milliseconds
+    char *rate_str = NULL;
+    char *query_start = strstr(buffer, "GET /cpu_usage?");
+    if (query_start) {
+        char *query = query_start + strlen("GET /cpu_usage?");
+        char *query_end = strchr(query, ' ');
+        if (query_end) {
+            char query_string[1024];
+            strncpy(query_string, query, query_end - query);
+            query_string[query_end - query] = '\0';
+
+            // Parse query parameters
+            char *token = strtok(query_string, "&");
+            while (token != NULL) {
+                if (strncmp(token, "rate=", 5) == 0) {
+                    rate_str = token + 5;
+                    break;
+                }
+                token = strtok(NULL, "&");
+            }
+
+            if (rate_str != NULL) {
+                int parsed_rate = atoi(rate_str);
+                if (parsed_rate > 0) {
+                    rate = parsed_rate;
+                }
+            }
+        }
+    }
+    return rate;
 }
 
 void *client_handler(void *socket_desc) {
@@ -31,13 +64,20 @@ void *client_handler(void *socket_desc) {
     read_size = recv(sock, buffer, BUFFER_SIZE - 1, 0);
     if (read_size > 0) {
         buffer[read_size] = '\0';
+
         // Check if the request is for CPU usage data
         if (strstr(buffer, "GET /cpu_usage")) {
             printf("Client requested CPU usage data.\n");
 
+            // Parse the update rate from the query parameters
+            int client_update_rate = parse_update_rate(buffer);
+            printf("Client update rate: %d milliseconds\n", client_update_rate);
+
             // Send headers
-            char headers[] = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
-                             "Cache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
+            char headers[] = "HTTP/1.1 200 OK\r\n"
+                             "Content-Type: text/event-stream\r\n"
+                             "Cache-Control: no-cache\r\n"
+                             "Connection: keep-alive\r\n\r\n";
             send(sock, headers, strlen(headers), 0);
 
             // Initialize CPU usage variables
@@ -86,7 +126,7 @@ void *client_handler(void *socket_desc) {
 
                 printf("Sent data to client: %s", data);
 
-                sleep(update_rate);
+                usleep(client_update_rate * 1000); // Sleep for specified milliseconds
             }
         } else {
             // Send 404 Not Found
@@ -107,14 +147,6 @@ int main(int argc, char *argv[]) {
     // Handle Ctrl+C and SIGPIPE
     signal(SIGINT, handle_sigint);
     signal(SIGPIPE, SIG_IGN);
-
-    // Allow adjustable update rate via command line argument
-    if (argc > 1) {
-        update_rate = atoi(argv[1]);
-        if (update_rate <= 0) {
-            update_rate = 1; // Reset to default if invalid
-        }
-    }
 
     // Create socket
     server_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -145,7 +177,6 @@ int main(int argc, char *argv[]) {
     listen(server_fd, 5);
 
     printf("Backend server listening on port %d\n", PORT);
-    printf("Update rate: %d seconds\n", update_rate);
 
     c = sizeof(struct sockaddr_in);
 

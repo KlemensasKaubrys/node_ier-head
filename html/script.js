@@ -1,11 +1,12 @@
 let eventSource;
-let updateRate = 1; // Default update rate
+let updateRate = 1000; // Default update rate in milliseconds
 
 function startEventSource() {
     if (eventSource) {
         eventSource.close();
     }
-    eventSource = new EventSource('/backend/cpu_usage');
+    // Include the update rate as a query parameter
+    eventSource = new EventSource('/backend/cpu_usage?rate=' + updateRate);
     eventSource.onmessage = function(e) {
         document.getElementById('cpuUsage').innerText = parseFloat(e.data).toFixed(2) + '%';
     };
@@ -17,13 +18,11 @@ function startEventSource() {
 function updateRateFunction() {
     const rateInput = document.getElementById('updateRate');
     updateRate = parseInt(rateInput.value);
-    if (isNaN(updateRate) || updateRate < 1) {
-        updateRate = 1;
-        rateInput.value = 1;
+    if (isNaN(updateRate) || updateRate < 100) {
+        updateRate = 1000; // Default to 1000 milliseconds if invalid
+        rateInput.value = 1000;
     }
-    // Restart the backend with the new update rate
-    // Note: For this to work, the backend needs to support per-client update rates or receive the update rate via query parameters
-    // For now, we can refresh the event source
+    // Restart the EventSource with the new update rate
     startEventSource();
 }
 

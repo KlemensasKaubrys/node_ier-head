@@ -5,7 +5,7 @@
     <style>
         body { font-family: Arial, sans-serif; text-align: center; }
         #cpuUsage { font-size: 2em; margin-top: 20px; }
-        #updateRate { width: 50px; }
+        #updateRate { width: 80px; }
     </style>
 </head>
 <body>
@@ -13,8 +13,8 @@
     <p>Current CPU Load:</p>
     <div id="cpuUsage">--%</div>
     <p>
-        Update Rate (seconds): 
-        <input type="number" id="updateRate" value="1" min="1" />
+        Update Rate (milliseconds): 
+        <input type="number" id="updateRate" value="1000" min="100" />
         <button onclick="updateRateFunction()">Set</button>
     </p>
     <script src="script.js"></script>
