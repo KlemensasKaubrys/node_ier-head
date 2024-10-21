@@ -22,9 +22,6 @@ fi
 PROJECT_PATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 echo -e "${YELLOW}Project path detected: ${PROJECT_PATH}${NC}"
 
-# Ensure scripts have execute permissions
-chmod +x "$PROJECT_PATH/install_and_run.sh"
-
 # Function to stop running services
 function stop_services {
     echo -e "${YELLOW}Stopping any running services...${NC}"
@@ -66,10 +63,23 @@ function install_packages {
     echo -e "${YELLOW}Updating package list...${NC}"
     sudo xbps-install -S || error_exit "Failed to update package list."
 
-    echo -e "${YELLOW}Installing required packages...${NC}"
-    sudo xbps-install -y nginx gcc make || error_exit "Failed to install packages."
+    # List of required packages
+    REQUIRED_PACKAGES=(nginx gcc make)
 
-    echo -e "${GREEN}All packages installed successfully.${NC}"
+    # Install missing packages
+    MISSING_PACKAGES=()
+    for pkg in "${REQUIRED_PACKAGES[@]}"; do
+        if ! xbps-query -Rs "^$pkg-" >/dev/null 2>&1; then
+            MISSING_PACKAGES+=("$pkg")
+        fi
+    done
+
+    if [ ${#MISSING_PACKAGES[@]} -ne 0 ]; then
+        echo -e "${YELLOW}Installing required packages: ${MISSING_PACKAGES[*]}${NC}"
+        sudo xbps-install -y "${MISSING_PACKAGES[@]}" || error_exit "Failed to install packages."
+    else
+        echo -e "${GREEN}All required packages are already installed.${NC}"
+    fi
 }
 
 # Function to compile the backend
@@ -84,8 +94,11 @@ function compile_backend {
 function configure_nginx {
     echo -e "${YELLOW}Configuring nginx...${NC}"
 
+    # Escape slashes and special characters in PROJECT_PATH for sed
+    ESCAPED_PROJECT_PATH=$(printf '%s\n' "$PROJECT_PATH" | sed -e 's/[\/&]/\\&/g')
+
     # Replace placeholder in nginx.conf with actual project path
-    sed "s|REPLACE_WITH_PROJECT_PATH|$PROJECT_PATH|g" "$PROJECT_PATH/nginx.conf" > "$PROJECT_PATH/nginx.conf.tmp"
+    sed "s/REPLACE_WITH_PROJECT_PATH/$ESCAPED_PROJECT_PATH/g" "$PROJECT_PATH/nginx.conf" > "$PROJECT_PATH/nginx.conf.tmp"
 
     # Backup existing nginx.conf and replace it
     if [ -f "/etc/nginx/nginx.conf" ]; then
