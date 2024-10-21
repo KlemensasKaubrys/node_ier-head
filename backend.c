@@ -7,7 +7,7 @@
 #include <netinet/in.h>
 #include <sys/sysinfo.h>
 #include <pthread.h>
-#include <time.h>
+#include <errno.h>
 
 #define PORT 9000
 #define BUFFER_SIZE 1024
@@ -36,8 +36,12 @@ void *client_handler(void *socket_desc) {
             printf("Client requested CPU usage data.\n");
 
             // Send headers
-            char headers[] = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
+            char headers[] = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n"
+                             "Cache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
             send(sock, headers, strlen(headers), 0);
+
+            // Initialize CPU usage variables
+            unsigned long long prev_user = 0, prev_nice = 0, prev_system = 0, prev_idle = 0;
 
             // Send CPU usage data periodically
             while (running) {
@@ -48,20 +52,18 @@ void *client_handler(void *socket_desc) {
                 // Read CPU usage from /proc/stat
                 fp = fopen("/proc/stat", "r");
                 if (fp != NULL) {
-                    unsigned long long int user, nice, system, idle;
+                    unsigned long long user, nice, system, idle;
                     fgets(cpu_info, sizeof(cpu_info), fp);
                     sscanf(cpu_info, "cpu %llu %llu %llu %llu", &user, &nice, &system, &idle);
                     fclose(fp);
 
-                    static unsigned long long int prev_user = 0, prev_nice = 0, prev_system = 0, prev_idle = 0;
+                    unsigned long long diff_user = user - prev_user;
+                    unsigned long long diff_nice = nice - prev_nice;
+                    unsigned long long diff_system = system - prev_system;
+                    unsigned long long diff_idle = idle - prev_idle;
 
-                    unsigned long long int diff_user = user - prev_user;
-                    unsigned long long int diff_nice = nice - prev_nice;
-                    unsigned long long int diff_system = system - prev_system;
-                    unsigned long long int diff_idle = idle - prev_idle;
-
-                    unsigned long long int total_diff = diff_user + diff_nice + diff_system + diff_idle;
-                    unsigned long long int idle_diff = diff_idle;
+                    unsigned long long total_diff = diff_user + diff_nice + diff_system + diff_idle;
+                    unsigned long long idle_diff = diff_idle;
 
                     if (total_diff != 0) {
                         cpu_usage = (double)(total_diff - idle_diff) / total_diff * 100.0;
@@ -75,9 +77,14 @@ void *client_handler(void *socket_desc) {
 
                 char data[128];
                 snprintf(data, sizeof(data), "data: %.2f\n\n", cpu_usage);
-                send(sock, data, strlen(data), 0);
 
-                printf("Sent data to client: %s", data);  // Verbose print
+                ssize_t bytes_sent = send(sock, data, strlen(data), 0);
+                if (bytes_sent == -1) {
+                    perror("send failed");
+                    break; // Exit the loop if send fails
+                }
+
+                printf("Sent data to client: %s", data);
 
                 sleep(update_rate);
             }
@@ -97,8 +104,9 @@ int main(int argc, char *argv[]) {
     int server_fd, client_sock, c;
     struct sockaddr_in server, client;
 
-    // Handle Ctrl+C
+    // Handle Ctrl+C and SIGPIPE
     signal(SIGINT, handle_sigint);
+    signal(SIGPIPE, SIG_IGN);
 
     // Allow adjustable update rate via command line argument
     if (argc > 1) {
@@ -115,6 +123,13 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Set SO_REUSEADDR to reuse the port immediately after the program exits
+    int opt = 1;
+    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0) {
+        perror("setsockopt failed");
+        return 1;
+    }
+
     // Prepare the sockaddr_in structure
     server.sin_family = AF_INET;
     server.sin_addr.s_addr = INADDR_ANY;
@@ -127,7 +142,7 @@ int main(int argc, char *argv[]) {
     }
 
     // Listen
-    listen(server_fd, 3);
+    listen(server_fd, 5);
 
     printf("Backend server listening on port %d\n", PORT);
     printf("Update rate: %d seconds\n", update_rate);
@@ -150,7 +165,9 @@ int main(int argc, char *argv[]) {
         *new_sock = client_sock;
         if (pthread_create(&client_thread, NULL, client_handler, (void*)new_sock) < 0) {
             perror("Could not create thread");
-            return 1;
+            free(new_sock);
+            close(client_sock);
+            continue;
         }
         pthread_detach(client_thread);
     }

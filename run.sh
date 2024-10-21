@@ -51,9 +51,15 @@ function stop_services {
     echo -e "${YELLOW}\nStopping services...${NC}"
     echo -e "${YELLOW}Stopping nginx...${NC}"
     sudo nginx -s stop
-    echo -e "${YELLOW}Stopping backend server...${NC}"
-    kill $BACKEND_PID
-    echo -e "${GREEN}Services stopped.${NC}"
+
+    if ps -p $BACKEND_PID > /dev/null; then
+        echo -e "${YELLOW}Stopping backend server...${NC}"
+        kill $BACKEND_PID
+        echo -e "${GREEN}Backend server stopped.${NC}"
+    else
+        echo -e "${YELLOW}Backend server is not running.${NC}"
+    fi
+
     exit 0
 }
 
